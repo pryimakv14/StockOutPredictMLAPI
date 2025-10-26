@@ -9,12 +9,9 @@ from prophet import Prophet
 from sklearn.metrics import mean_absolute_error
 import numpy as np
 
-# --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 MODEL_DIR = os.getenv("MODEL_DIR", "trained_models")
-# Default path assumes it's run from within the python_service dir locally,
-# or /app/data when run via Docker with the volume mount.
 DATA_FILE_PATH = os.getenv("DATA_FILE_PATH", "data/sales_history.csv")
 
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -22,10 +19,9 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 app = FastAPI(
     title="Magento Sales Predictor API",
     description="API for training ML models, predicting future sales, and validating model accuracy.",
-    version="0.0.4" # Incremented version
+    version="0.0.1"
 )
 
-# --- Helper Functions ---
 
 def get_product_data(sku: str) -> pd.DataFrame | None:
     """Loads CSV, filters by SKU, aggregates daily, and prepares for Prophet."""
@@ -84,8 +80,8 @@ def predict_sales_next_periods(model: Prophet, forecast_horizon: int = 30) -> Di
         future = model.make_future_dataframe(periods=actual_horizon)
         forecast = model.predict(future)
 
-        today = pd.Timestamp.now().normalize().tz_localize(None) # Use timezone-naive today
-        forecast['ds'] = forecast['ds'].dt.tz_localize(None) # Ensure forecast ds is naive
+        today = pd.Timestamp.now().normalize().tz_localize(None)
+        forecast['ds'] = forecast['ds'].dt.tz_localize(None)
         future_forecast = forecast[forecast['ds'] > today].copy()
         future_forecast['yhat'] = future_forecast['yhat'].clip(lower=0)
 
@@ -93,12 +89,10 @@ def predict_sales_next_periods(model: Prophet, forecast_horizon: int = 30) -> Di
         date_15_days_end = today + pd.Timedelta(days=15)
         date_30_days_end = today + pd.Timedelta(days=30)
 
-        # Sum daily predictions (yhat) within each period
         sales_next_7 = future_forecast[future_forecast['ds'] <= date_7_days_end]['yhat'].sum()
         sales_next_15 = future_forecast[future_forecast['ds'] <= date_15_days_end]['yhat'].sum()
         sales_next_30 = future_forecast[future_forecast['ds'] <= date_30_days_end]['yhat'].sum()
 
-        # Cast to float for JSON serialization
         results["predicted_total_sales_next_7_days"] = float(round(sales_next_7, 2))
         results["predicted_total_sales_next_15_days"] = float(round(sales_next_15, 2))
         results["predicted_total_sales_next_30_days"] = float(round(sales_next_30, 2))
@@ -106,7 +100,6 @@ def predict_sales_next_periods(model: Prophet, forecast_horizon: int = 30) -> Di
 
     except Exception as e:
         logging.error(f"Error during future sales prediction: {e}", exc_info=True)
-        # Keep default "Error" values
 
     return results
 
@@ -174,7 +167,6 @@ async def run_period_accuracy_validation(
         logging.error(f"Error training temporary validation model for SKU {sku}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Validation failed during training: {e}")
 
-    # Make predictions for the test period
     try:
         future_df_test_period = test_df[['ds']].copy()
         forecast = model.predict(future_df_test_period)
@@ -189,7 +181,6 @@ async def run_period_accuracy_validation(
         logging.error(f"Error predicting for validation (SKU {sku}): {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Validation failed during prediction: {e}")
 
-    # Calculate Period Metrics
     try:
         ae_7 = abs(actual_sales_7 - predicted_sales_7)
         ape_7 = (ae_7 / actual_sales_7 * 100) if actual_sales_7 != 0 else np.inf
@@ -198,7 +189,6 @@ async def run_period_accuracy_validation(
         ae_30 = abs(actual_sales_30 - predicted_sales_30)
         ape_30 = (ae_30 / actual_sales_30 * 100) if actual_sales_30 != 0 else np.inf
 
-        # Cast results to float/str for JSON serialization
         metrics = {
             "7_day_actual": float(round(actual_sales_7, 2)),
             "7_day_predicted": float(round(predicted_sales_7, 2)),
@@ -220,7 +210,6 @@ async def run_period_accuracy_validation(
         logging.error(f"Error calculating period metrics for SKU {sku}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Validation failed during metric calculation: {e}")
 
-    # Return results
     return {
         "sku": sku,
         "validation_period_info": f"Training data until {cutoff_date.date()}, Testing on {len(test_df)} subsequent days.",
@@ -233,8 +222,6 @@ async def run_period_accuracy_validation(
         "period_metrics": metrics
     }
 
-
-# --- API Endpoints ---
 
 @app.post('/train/{sku}', status_code=status.HTTP_200_OK, summary="Train Model for SKU")
 async def train_model_endpoint(
@@ -263,9 +250,8 @@ async def train_model_endpoint(
 
 
 @app.get('/predict/{sku}', summary="Predict Future Sales for SKU")
-async def predict_sales_endpoint( # Renamed endpoint function
+async def predict_sales_endpoint(
     sku: str = Path(..., description="The product SKU to predict sales for.")
-    # Removed current_stock parameter
 ):
     """
     Predicts total sales for the next 7, 15, and 30 days.
@@ -282,14 +268,12 @@ async def predict_sales_endpoint( # Renamed endpoint function
         model = joblib.load(model_path)
         logging.info(f"Loaded trained model for SKU: {sku} from {model_path}")
         
-        # Only get future sales predictions
         sales_results = predict_sales_next_periods(model)
 
     except Exception as e:
         logging.error(f"Prediction failed for SKU {sku}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to load model or run prediction: {e}")
 
-    # Return only the relevant results
     return {
         "sku": sku,
         **sales_results, # Unpack predicted sales for 7/15/30 days
@@ -330,12 +314,10 @@ async def health_check():
     return {"status": "healthy"}
 
 
-# --- Main execution block for local testing ---
 if __name__ == "__main__":
     import uvicorn
     if not os.path.exists(DATA_FILE_PATH):
         logging.warning(f"LOCAL DEV: Data file not found at '{DATA_FILE_PATH}'. Create dummy data or adjust path/env var.")
-        # Optional: Add dummy data creation here if desired for local testing
 
     logging.info("Starting Uvicorn server for local development on http://0.0.0.0:5000")
     uvicorn.run("main:app", host="0.0.0.0", port=5000, reload=True)
