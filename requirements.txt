@@ -2,7 +2,6 @@ fastapi
 uvicorn[standard]
 pandas
 prophet
-xgboost
 joblib
 python-dotenv
 scikit-learn

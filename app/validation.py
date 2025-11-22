@@ -3,24 +3,22 @@ import numpy as np
 import logging
 from typing import Dict, Any
 from fastapi import HTTPException, status
+from prophet import Prophet
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from app.data_handler import get_product_data
-from app.forecast_models.factory import create_model
 
 logger = logging.getLogger(__name__)
 
 async def run_period_accuracy_validation(
         sku: str,
         test_period_days: int = 30,
-        model_type: str = "prophet",
         changepoint_prior_scale: float = 0.05,
         seasonality_prior_scale: float = 10.0,
         holidays_prior_scale: float = 10.0,
         seasonality_mode: str = 'additive',
         yearly_seasonality: bool = True,
         weekly_seasonality: bool = True,
-        daily_seasonality: bool = False,
-        **kwargs
+        daily_seasonality: bool = False
 ) -> Dict[str, Any]:
 
     logger.info(f"Running PERIOD accuracy validation for SKU: {sku} with test period: {test_period_days} days")
@@ -66,27 +64,25 @@ async def run_period_accuracy_validation(
                             detail=f"Failed to split data/calculate actuals: {e}")
 
     try:
-        # Build model parameters based on model type
-        model_params = {}
-        if model_type.lower() == "prophet":
-            model_params = {
-                'changepoint_prior_scale': changepoint_prior_scale,
-                'seasonality_prior_scale': seasonality_prior_scale,
-                'holidays_prior_scale': holidays_prior_scale,
-                'seasonality_mode': seasonality_mode,
-                'yearly_seasonality': yearly_seasonality,
-                'weekly_seasonality': weekly_seasonality,
-                'daily_seasonality': daily_seasonality
-            }
-        else:  # xgboost or other models
-            # Use any additional kwargs for XGBoost parameters
-            model_params = kwargs
+        model = Prophet(
+            changepoint_prior_scale=changepoint_prior_scale,
+            seasonality_prior_scale=seasonality_prior_scale,
+            holidays_prior_scale=holidays_prior_scale,
+            seasonality_mode=seasonality_mode,
+            yearly_seasonality=yearly_seasonality,
+            weekly_seasonality=weekly_seasonality,
+            daily_seasonality=daily_seasonality
+        )
         
-        model = create_model(model_type=model_type, **model_params)
         model.fit(train_df)
-        
-        params_used_log = str(model_params)
-        logger.info(f"Trained validation model ({model_type}) for SKU {sku} with params: {params_used_log}")
+        params_used_log = (
+            f"changepoint_prior_scale={changepoint_prior_scale}, "
+            f"seasonality_prior_scale={seasonality_prior_scale}, "
+            f"holidays_prior_scale={holidays_prior_scale}, "
+            f"seasonality_mode={seasonality_mode}, "
+            f"yearly={yearly_seasonality}, weekly={weekly_seasonality}, daily={daily_seasonality}"
+        )
+        logger.info(f"Trained validation model for SKU {sku} with params: {params_used_log}")
                      
     except Exception as e:
         logger.error(f"Error training temporary validation model for SKU {sku}: {e}", exc_info=True)
@@ -94,9 +90,8 @@ async def run_period_accuracy_validation(
                             detail=f"Validation failed during training: {e}")
 
     try:
-        # Use the abstract interface for prediction
-        last_train_date = train_df['ds'].max()
-        forecast = model.predict(periods=len(test_df), last_date=last_train_date)
+        future_df_test_period = test_df[['ds']].copy().sort_values('ds')
+        forecast = model.predict(future_df_test_period)
         forecast['ds'] = pd.to_datetime(forecast['ds']).dt.tz_localize(None)
         forecast['yhat'] = forecast['yhat'].clip(lower=0)
 
@@ -151,10 +146,17 @@ async def run_period_accuracy_validation(
 
     return {
         "sku": sku,
-        "model_type": model_type,
         "validation_period_info": f"Training data until {cutoff_date.date()}, "
                                   f"Testing on historical data from {test_df['ds'].min().date()} to {test_df['ds'].max().date()} ({len(test_df)} days).",
-        "parameters_used": model_params,
+        "parameters_used": {
+            "changepoint_prior_scale": changepoint_prior_scale,
+            "seasonality_prior_scale": seasonality_prior_scale,
+            "holidays_prior_scale": holidays_prior_scale,
+            "seasonality_mode": seasonality_mode,
+            "yearly_seasonality": yearly_seasonality,
+            "weekly_seasonality": weekly_seasonality,
+            "daily_seasonality": daily_seasonality
+        },
         "predicted": predicted_list,
         "actual": actual_list,
         "metrics": {

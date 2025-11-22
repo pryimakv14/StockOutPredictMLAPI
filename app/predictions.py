@@ -24,7 +24,6 @@ def predict_stock_duration(model: Prophet, current_stock: int, forecast_horizon_
         forecast['ds'] = forecast['ds'].dt.tz_localize(None)
         future_forecast = forecast[forecast['ds'] > last_training_date].copy()
         
-        future_forecast = model.predict(periods=forecast_horizon_days, last_date=last_training_date)
         future_forecast['yhat'] = future_forecast['yhat'].clip(lower=0)
         
         if future_forecast.empty:

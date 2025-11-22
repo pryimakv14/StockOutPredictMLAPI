@@ -12,7 +12,7 @@ from app.data_handler import get_product_data
 from app.model_training import perform_hyperparameter_tuning
 from app.predictions import predict_stock_duration
 from app.validation import run_period_accuracy_validation
-from app.forecast_models.factory import create_model
+from prophet import Prophet
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ app = FastAPI(
 @app.post('/train/{sku}', status_code=status.HTTP_200_OK, summary="Train Model for SKU")
 async def train_model_endpoint(
         sku: str = Path(..., description="The product SKU to train the model for."),
-        model_type: str = Query("prophet", description="Model type: 'prophet' or 'xgboost'"),
         params: Optional[OptionalHyperparameters] = Body(None, description="Optional: Specific hyperparameters to use. If omitted, random search tuning will be performed.")
 ):
     logger.info(f"Received training request for SKU: {sku}")
@@ -45,7 +44,7 @@ async def train_model_endpoint(
 
     if params is None:
         logger.info(f"No specific parameters provided for SKU {sku}. Running random search tuning...")
-        tuning_results_dict = perform_hyperparameter_tuning(df_daily, model_type=model_type, horizon_days=30)
+        tuning_results_dict = perform_hyperparameter_tuning(df_daily, horizon_days=30)
         
         best_params = tuning_results_dict.get("best_parameters", {})
         training_info = tuning_results_dict
@@ -64,19 +63,17 @@ async def train_model_endpoint(
         logger.info(f"Training SKU {sku} with provided params: {best_params}")
 
     try:
-        # Set default parameters based on model type
-        if model_type.lower() == "prophet":
-            default_args = {
-                'yearly_seasonality': True,
-                'weekly_seasonality': True,
-                'daily_seasonality': False 
-            }
-            default_args.update(best_params)
-            best_params = default_args
+        prophet_args = {
+            'yearly_seasonality': True,
+            'weekly_seasonality': True,
+            'daily_seasonality': False 
+        }
+        prophet_args.update(best_params)
 
-        model = create_model(model_type=model_type, **best_params)
+        model = Prophet(**prophet_args)
+        
         model.fit(df_daily)
-        model_path = os.path.join(MODEL_DIR, f"{sku}_{model_type.lower()}.joblib")
+        model_path = os.path.join(MODEL_DIR, f"{sku}.joblib")
         joblib.dump(model, model_path)
         logger.info(f"Model for SKU {sku} saved successfully to {model_path}")
     except Exception as e:
@@ -86,7 +83,6 @@ async def train_model_endpoint(
     return {
         "status": "success",
         "sku": sku,
-        "model_type": model_type,
         "message": "Model trained successfully.",
         "model_saved_at": model_path,
         "training_info": training_info
@@ -97,15 +93,14 @@ async def train_model_endpoint(
 async def predict_sales_endpoint(
         sku: str = Path(..., description="The product SKU to predict sales for."),
         current_stock: int = Query(..., description="The current number of items in stock.", ge=0),
-        forecast_horizon_days: int = Query(365, description="How many days into the future to look for stock depletion.", ge=30, le=1095),
-        model_type: str = Query("prophet", description="Model type: 'prophet' or 'xgboost'")
+        forecast_horizon_days: int = Query(365, description="How many days into the future to look for stock depletion.", ge=30, le=1095)
 ):
     logger.info(f"Received stock duration prediction request for SKU: {sku} with stock: {current_stock}")
-    model_path = os.path.join(MODEL_DIR, f"{sku}_{model_type.lower()}.joblib")
+    model_path = os.path.join(MODEL_DIR, f"{sku}.joblib")
 
     if not os.path.exists(model_path):
         logger.warning(f"Prediction failed: No trained model found for SKU {sku} at {model_path}.")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No trained model found for SKU {sku} with model type {model_type}.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No trained model found for SKU {sku}.")
 
     try:
         model = joblib.load(model_path)
@@ -126,7 +121,7 @@ async def predict_sales_endpoint(
         "sku": sku,
         "current_stock_provided": current_stock,
         "forecast_horizon_checked": forecast_horizon_days,
-        "prediction_engine": model.get_model_name() if hasattr(model, 'get_model_name') else model_type,
+        "prediction_engine": "Prophet",
         **duration_results
     }
 
@@ -136,14 +131,12 @@ async def predict_sales_endpoint(
           response_model=Dict[str, Any])
 async def validate_period_accuracy_endpoint(
         sku: str = Path(..., description="The product SKU to validate accuracy for."),
-        model_type: str = Query("prophet", description="Model type: 'prophet' or 'xgboost'"),
         request: ValidationRequest = Body(..., description="Validation parameters including test period days and hyperparameters")
 ) -> Dict[str, Any]:
     logger.info(f"Received validation request for SKU: {sku} with parameters: {request}")
     validation_results = await run_period_accuracy_validation(
         sku=sku,
         test_period_days=request.test_period_days,
-        model_type=model_type,
         changepoint_prior_scale=request.changepoint_prior_scale,
         seasonality_prior_scale=request.seasonality_prior_scale,
         holidays_prior_scale=request.holidays_prior_scale,
