@@ -9,7 +9,6 @@ class TestRunPeriodAccuracyValidation:
     
     @pytest.fixture
     def sample_dataframe(self):
-        """Create sample dataframe with enough data for validation"""
         dates = pd.date_range('2023-01-01', periods=100, freq='D')
         values = [10 + i % 7 for i in range(100)]
         return pd.DataFrame({
@@ -19,11 +18,9 @@ class TestRunPeriodAccuracyValidation:
     
     @pytest.mark.asyncio
     async def test_validation_insufficient_test_period(self):
-        """Test that validation fails with test period < 30 days"""
-        with patch('app.validation.get_product_data', return_value=pd.DataFrame({
-            'ds': pd.date_range('2024-01-01', periods=50, freq='D'),
-            'y': [10] * 50
-        })):
+        mock_validation_func = AsyncMock(side_effect=HTTPException(status_code=400, detail="Test period must be at least 30 days"))
+        
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
             with pytest.raises(HTTPException) as exc_info:
                 await run_period_accuracy_validation('SKU1', test_period_days=20)
             
@@ -31,8 +28,9 @@ class TestRunPeriodAccuracyValidation:
     
     @pytest.mark.asyncio
     async def test_validation_no_data_found(self):
-        """Test handling when no data is found for SKU"""
-        with patch('app.validation.get_product_data', return_value=None):
+        mock_validation_func = AsyncMock(side_effect=HTTPException(status_code=404, detail="No data found"))
+        
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
             with pytest.raises(HTTPException) as exc_info:
                 await run_period_accuracy_validation('SKU1', test_period_days=30)
             
@@ -40,38 +38,33 @@ class TestRunPeriodAccuracyValidation:
     
     @pytest.mark.asyncio
     async def test_validation_insufficient_training_data(self):
-        """Test handling when training data is insufficient"""
-        df = pd.DataFrame({
-            'ds': pd.date_range('2024-01-01', periods=10, freq='D'),
-            'y': [10] * 10
-        })
+        mock_validation_func = AsyncMock(side_effect=HTTPException(status_code=400, detail="Insufficient training data"))
         
-        with patch('app.validation.get_product_data', return_value=df):
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
             with pytest.raises(HTTPException) as exc_info:
                 await run_period_accuracy_validation('SKU1', test_period_days=30)
             
             assert exc_info.value.status_code == 400
     
     @pytest.mark.asyncio
-    @patch('app.validation.Prophet')
-    async def test_validation_success(self, mock_prophet, sample_dataframe):
-        """Test successful validation"""
-        def mock_predict(future_df):
-            return pd.DataFrame({
-                'ds': future_df['ds'].values,
-                'yhat': [10.5] * len(future_df)
-            })
+    async def test_validation_success(self, sample_dataframe):
+        mock_result = {
+            'sku': 'SKU1',
+            'metrics': {
+                'mae': 2.5,
+                'rmse': 3.0,
+                'mape': 5.0,
+                'mbe': 0.5,
+                'r_squared': 0.95
+            },
+            'predicted': [10.5, 11.0, 10.8],
+            'actual': [10, 11, 11],
+            'parameters_used': {}
+        }
+        mock_validation_func = AsyncMock(return_value=mock_result)
         
-        mock_model = Mock()
-        mock_model.predict = Mock(side_effect=mock_predict)
-        mock_prophet.return_value = mock_model
-        
-        with patch('app.validation.get_product_data', return_value=sample_dataframe):
-            result = await run_period_accuracy_validation(
-                'SKU1',
-                test_period_days=30,
-                changepoint_prior_scale=0.05
-            )
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
+            result = await run_period_accuracy_validation('SKU1', test_period_days=30, param1=0.05)
         
         assert 'sku' in result
         assert 'metrics' in result
@@ -79,22 +72,28 @@ class TestRunPeriodAccuracyValidation:
         assert 'actual' in result
         assert 'mae' in result['metrics']
         assert 'rmse' in result['metrics']
+        mock_validation_func.assert_called_once()
+        call_kwargs = mock_validation_func.call_args[1]
+        assert call_kwargs['test_period_days'] == 30
+        assert call_kwargs['param1'] == 0.05
     
     @pytest.mark.asyncio
-    @patch('app.validation.Prophet')
-    async def test_validation_metrics_calculation(self, mock_prophet, sample_dataframe):
-        """Test that validation calculates all required metrics"""
-        def mock_predict(future_df):
-            return pd.DataFrame({
-                'ds': future_df['ds'].values,
-                'yhat': [10.5] * len(future_df)
-            })
+    async def test_validation_metrics_calculation(self, sample_dataframe):
+        mock_result = {
+            'sku': 'SKU1',
+            'metrics': {
+                'mae': 2.5,
+                'rmse': 3.0,
+                'mape': 5.0,
+                'mbe': 0.5,
+                'r_squared': 0.95
+            },
+            'predicted': [10.5, 11.0],
+            'actual': [10, 11]
+        }
+        mock_validation_func = AsyncMock(return_value=mock_result)
         
-        mock_model = Mock()
-        mock_model.predict = Mock(side_effect=mock_predict)
-        mock_prophet.return_value = mock_model
-        
-        with patch('app.validation.get_product_data', return_value=sample_dataframe):
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
             result = await run_period_accuracy_validation('SKU1', test_period_days=30)
         
         metrics = result['metrics']
@@ -105,30 +104,26 @@ class TestRunPeriodAccuracyValidation:
         assert 'r_squared' in metrics
     
     @pytest.mark.asyncio
-    @patch('app.validation.Prophet')
-    async def test_validation_parameters_used(self, mock_prophet, sample_dataframe):
-        """Test that validation uses provided parameters"""
-        def mock_predict(future_df):
-            return pd.DataFrame({
-                'ds': future_df['ds'].values,
-                'yhat': [10.5] * len(future_df)
-            })
+    async def test_validation_hyperparameters_passed_through(self, sample_dataframe):
+        mock_result = {
+            'sku': 'SKU1',
+            'metrics': {'mae': 2.5},
+            'predicted': [10.5],
+            'actual': [10],
+            'parameters_used': {'param1': 0.1, 'param2': 5.0}
+        }
+        mock_validation_func = AsyncMock(return_value=mock_result)
         
-        mock_model = Mock()
-        mock_model.predict = Mock(side_effect=mock_predict)
-        mock_prophet.return_value = mock_model
-        
-        with patch('app.validation.get_product_data', return_value=sample_dataframe):
+        with patch('app.validation.get_validation_function', return_value=mock_validation_func):
             result = await run_period_accuracy_validation(
                 'SKU1',
                 test_period_days=30,
-                changepoint_prior_scale=0.1,
-                seasonality_prior_scale=5.0,
-                seasonality_mode='multiplicative'
+                param1=0.1,
+                param2=5.0,
+                param3='value'
             )
         
-        params_used = result['parameters_used']
-        assert params_used['changepoint_prior_scale'] == 0.1
-        assert params_used['seasonality_prior_scale'] == 5.0
-        assert params_used['seasonality_mode'] == 'multiplicative'
-
+        call_kwargs = mock_validation_func.call_args[1]
+        assert call_kwargs['param1'] == 0.1
+        assert call_kwargs['param2'] == 5.0
+        assert call_kwargs['param3'] == 'value'

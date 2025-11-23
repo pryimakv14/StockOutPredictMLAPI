@@ -1,11 +1,10 @@
 import logging
 from typing import Dict, Any
-from prophet import Prophet
+from app.model_interface import BaseModel
 
 logger = logging.getLogger(__name__)
 
-
-def predict_stock_duration(model: Prophet, current_stock: int, forecast_horizon_days: int = 365) -> Dict[str, Any]:
+def predict_stock_duration(model: BaseModel, current_stock: int, forecast_horizon_days: int = 365) -> Dict[str, Any]:
     try:
         if model.history is None or model.history.empty:
             logger.error("Model history is not available. Cannot determine last training date.")
@@ -71,4 +70,3 @@ def predict_stock_duration(model: Prophet, current_stock: int, forecast_horizon_
             "predicted_out_of_stock_date": None,
             "last_training_date": None
         }
-

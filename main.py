@@ -12,7 +12,7 @@ from app.data_handler import get_product_data
 from app.model_training import perform_hyperparameter_tuning
 from app.predictions import predict_stock_duration
 from app.validation import run_period_accuracy_validation
-from prophet import Prophet
+from app.model_factory import create_model, get_model_name
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -63,14 +63,7 @@ async def train_model_endpoint(
         logger.info(f"Training SKU {sku} with provided params: {best_params}")
 
     try:
-        prophet_args = {
-            'yearly_seasonality': True,
-            'weekly_seasonality': True,
-            'daily_seasonality': False 
-        }
-        prophet_args.update(best_params)
-
-        model = Prophet(**prophet_args)
+        model = create_model(params=best_params)
         
         model.fit(df_daily)
         model_path = os.path.join(MODEL_DIR, f"{sku}.joblib")
@@ -121,7 +114,7 @@ async def predict_sales_endpoint(
         "sku": sku,
         "current_stock_provided": current_stock,
         "forecast_horizon_checked": forecast_horizon_days,
-        "prediction_engine": "Prophet",
+        "prediction_engine": get_model_name(),
         **duration_results
     }
 
@@ -134,16 +127,13 @@ async def validate_period_accuracy_endpoint(
         request: ValidationRequest = Body(..., description="Validation parameters including test period days and hyperparameters")
 ) -> Dict[str, Any]:
     logger.info(f"Received validation request for SKU: {sku} with parameters: {request}")
+    # Convert request to dict and pass as kwargs to maintain abstraction
+    request_dict = request.model_dump(exclude_unset=False)
+    test_period_days = request_dict.pop('test_period_days')
     validation_results = await run_period_accuracy_validation(
         sku=sku,
-        test_period_days=request.test_period_days,
-        changepoint_prior_scale=request.changepoint_prior_scale,
-        seasonality_prior_scale=request.seasonality_prior_scale,
-        holidays_prior_scale=request.holidays_prior_scale,
-        seasonality_mode=request.seasonality_mode,
-        yearly_seasonality=request.yearly_seasonality,
-        weekly_seasonality=request.weekly_seasonality,
-        daily_seasonality=request.daily_seasonality
+        test_period_days=test_period_days,
+        **request_dict
     )
 
     return validation_results

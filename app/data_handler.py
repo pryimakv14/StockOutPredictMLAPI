@@ -5,7 +5,6 @@ from app.config import DATA_FILE_PATH
 
 logger = logging.getLogger(__name__)
 
-
 def get_product_data(sku: str) -> pd.DataFrame | None:
     try:
         logger.info(f"Attempting to read data file: {DATA_FILE_PATH}")

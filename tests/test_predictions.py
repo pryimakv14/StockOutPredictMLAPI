@@ -6,7 +6,6 @@ from app.predictions import predict_stock_duration
 class TestPredictStockDuration:
     
     def test_predict_stock_duration_success(self):
-        """Test successful stock duration prediction"""
         mock_model = Mock()
         history_dates = pd.date_range('2024-01-01', periods=30, freq='D')
         mock_model.history = pd.DataFrame({
@@ -34,7 +33,6 @@ class TestPredictStockDuration:
         assert result['last_training_date'] is not None
     
     def test_predict_stock_duration_empty_history(self):
-        """Test handling when model history is empty"""
         mock_model = Mock()
         mock_model.history = None
         
@@ -46,7 +44,6 @@ class TestPredictStockDuration:
         assert result['last_training_date'] is None
     
     def test_predict_stock_duration_stock_not_depleted(self):
-        """Test when stock doesn't run out within forecast horizon"""
         mock_model = Mock()
         history_dates = pd.date_range('2024-01-01', periods=30, freq='D')
         mock_model.history = pd.DataFrame({
@@ -73,7 +70,6 @@ class TestPredictStockDuration:
         assert result['error_message'] is not None
     
     def test_predict_stock_duration_negative_predictions_clipped(self):
-        """Test that negative predictions are clipped to zero"""
         mock_model = Mock()
         history_dates = pd.date_range('2024-01-01', periods=30, freq='D')
         mock_model.history = pd.DataFrame({
@@ -99,7 +95,6 @@ class TestPredictStockDuration:
         assert result['error_message'] is None
     
     def test_predict_stock_duration_empty_forecast(self):
-        """Test handling when future forecast is empty"""
         mock_model = Mock()
         mock_model.history = pd.DataFrame({
             'ds': pd.date_range('2024-01-01', periods=30, freq='D'),
@@ -120,7 +115,6 @@ class TestPredictStockDuration:
         assert "No future forecast data" in result['error_message']
     
     def test_predict_stock_duration_exception_handling(self):
-        """Test exception handling during prediction"""
         mock_model = Mock()
         mock_model.history = pd.DataFrame({
             'ds': pd.date_range('2024-01-01', periods=30, freq='D'),
@@ -132,4 +126,3 @@ class TestPredictStockDuration:
         
         assert result['days_of_stock_remaining'] == "Error"
         assert "Test error" in result['error_message']
-

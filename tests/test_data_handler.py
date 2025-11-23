@@ -9,7 +9,6 @@ from app.data_handler import get_product_data
 class TestGetProductData:
     
     def test_get_product_data_success(self):
-        """Test successful data retrieval and aggregation"""
         test_data = """SKU1,5,2024-01-01
 SKU1,3,2024-01-01
 SKU1,2,2024-01-02
@@ -44,13 +43,11 @@ SKU2,1,2024-01-01"""
             os.unlink(tmp_path)
     
     def test_get_product_data_file_not_found(self):
-        """Test handling when data file doesn't exist"""
         with patch('app.data_handler.DATA_FILE_PATH', '/nonexistent/path/data.csv'):
             result = get_product_data('SKU1')
             assert result is None
     
     def test_get_product_data_empty_file(self):
-        """Test handling of empty CSV file"""
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp_file:
             tmp_path = tmp_file.name
         
@@ -62,7 +59,6 @@ SKU2,1,2024-01-01"""
             os.unlink(tmp_path)
     
     def test_get_product_data_sku_not_found(self):
-        """Test handling when SKU doesn't exist in data"""
         test_data = """SKU1,5,2024-01-01
 SKU2,3,2024-01-01"""
         
@@ -78,7 +74,6 @@ SKU2,3,2024-01-01"""
             os.unlink(tmp_path)
     
     def test_get_product_data_insufficient_data(self):
-        """Test handling when there are less than 14 data points"""
         test_data = '\n'.join([f"SKU1,1,2024-01-{i:02d}" for i in range(1, 10)])
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp_file:
@@ -93,7 +88,6 @@ SKU2,3,2024-01-01"""
             os.unlink(tmp_path)
     
     def test_get_product_data_case_insensitive(self):
-        """Test that SKU matching is case-insensitive"""
         import pandas as pd
         dates = pd.date_range('2024-01-01', periods=45, freq='D')
         test_data = '\n'.join([
@@ -117,7 +111,6 @@ SKU2,3,2024-01-01"""
             os.unlink(tmp_path)
     
     def test_get_product_data_daily_aggregation(self):
-        """Test that multiple orders on same day are aggregated"""
         test_data = '\n'.join([
             "SKU1,5,2024-01-01",
             "SKU1,3,2024-01-01",
@@ -138,4 +131,3 @@ SKU2,3,2024-01-01"""
                 assert jan_1_data['y'].values[0] == 10
         finally:
             os.unlink(tmp_path)
-

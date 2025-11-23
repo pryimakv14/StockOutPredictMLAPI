@@ -1,0 +1,2 @@
+"""Prophet model implementation module."""
+
