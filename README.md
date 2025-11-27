@@ -240,16 +240,3 @@ The project uses a factory pattern, making it easy to add new forecasting models
 2. Implement all abstract methods
 3. Update `app.model_factory.py` to use the new model
 4. Add model-specific training and validation logic
-
-## License
-
-[Specify your license here]
-
-## Contributing
-
-[Add contribution guidelines if applicable]
-
-## Support
-
-[Add support/contact information if applicable]
-
